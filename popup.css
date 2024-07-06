@@ -1,0 +1,53 @@
+body {
+    width: 20rem;
+    background: #333;
+    color: #fff;
+}
+
+ul {
+    list-style-type: none;
+    padding-inline-start: 0;
+    margin: 1rem 0;
+    height: 10rem;
+}
+
+li {
+    padding: 0.25rem;
+}
+
+li:nth-child(odd) {
+    background: #80808030;
+}
+
+li:nth-child(odd):hover {
+    background: #80808050;
+    color: black;
+}
+
+li:nth-child(even) {
+    background: #80808050;
+}
+
+li:nth-child(even):hover {
+    background: #80808030;
+    color: black;
+}
+
+li.tab {
+    cursor: pointer;
+}
+
+li.current-tab {
+    background: #FFDF33;
+    color: black;
+}
+
+.center {
+    display: block;
+    margin: auto;
+}
+
+#title {
+    text-align: center;
+    margin: 1rem 0;
+}
