@@ -9,8 +9,8 @@ let ignoreNextActivatedEvent = true;
 const loadHistoryFromStorage = async () => {
     return new Promise((resolve) => {
         console.log("Loading tab history from storage...");
-        chrome.storage.local.get(['tabHistory', 'currentTabIndex'], (result) => {
-            tabHistory = result.tabHistory || [];
+        chrome.storage.local.get(['history', 'currentTabIndex'], (result) => {
+            tabHistory = result.history || [];
             currentTabIndex = result.currentTabIndex || -1;
             console.log("Tab history loaded from storage: ", tabHistory);
             console.log("Current tab index loaded from storage: ", currentTabIndex);
@@ -48,8 +48,6 @@ const addTabToHistory = async (tabId) => {
     if (shouldIgnoreTab(tabId)) return;
     if (currentTabIndex !== 0) {
         console.log("Clearing history after current tab index.");
-        console.log("Current tab index: ", currentTabIndex);
-        console.log("Tab history length: ", tabHistory)
         tabHistory = tabHistory.slice(currentTabIndex);
         currentTabIndex = 0;
     }
@@ -57,6 +55,7 @@ const addTabToHistory = async (tabId) => {
         const tab = await getTabById(tabId);
         tabHistory.unshift(tab);
         updateData();
+        console.log(`Tab ${tabId} added to history.`);
     } catch (error) {
         console.error(`Failed to add tab to history: ${error}`);
     }
@@ -99,7 +98,7 @@ const openTabByIndex = async (index) => {
     }
     const tab = tabHistory[index];
     console.log(`Opening tab ${tab.tabId} by index ${index}`);
-    let success = await openTab(tab.tabId);
+    let success = await openTab(tab?.tabId);
     if (!success) {
         tabHistory.splice(index, 1);
         await openTabByIndex(index);
@@ -134,11 +133,12 @@ const setCurrentTabIndex = (index) => {
 const goBack = async () => {
     if (loadingHistory) return;
     if (currentTabIndex < tabHistory.length - 1) {
-        currentTabIndex++;
         const previousTab = tabHistory[currentTabIndex];
-        console.log(`Going back to tab ${previousTab.tabId}`);
-        let success = await openTab(previousTab.tabId);
-        if (!success) {
+        currentTabIndex++;
+        const newTab = tabHistory[currentTabIndex];
+        console.log(`Going back to tab ${newTab.tabId}`);
+        let success = await openTab(newTab.tabId);
+        if (!success || previousTab.tabId === newTab.tabId) {
             tabHistory.splice(currentTabIndex, 1);
             currentTabIndex--;
             await goBack();
@@ -151,11 +151,12 @@ const goBack = async () => {
 const goForward = async () => {
     if (loadingHistory) return;
     if (currentTabIndex > 0) {
+        const previousTab = tabHistory[currentTabIndex];
         currentTabIndex--;
-        const nextTab = tabHistory[currentTabIndex];
-        console.log(`Going forward to tab ${nextTab.tabId}`);
-        let success = await openTab(nextTab.tabId);
-        if (!success) {
+        const newTab = tabHistory[currentTabIndex];
+        console.log(`Going forward to tab ${newTab.tabId}`);
+        let success = await openTab(newTab.tabId);
+        if (!success || previousTab?.tabId === newTab?.tabId) {
             tabHistory.splice(currentTabIndex, 1);
             await goForward();
         }
@@ -165,15 +166,14 @@ const goForward = async () => {
 
 /** Updates the tab history and currentTabIndex in storage and sends a message to the popup.js to update the data. */
 const updateData = async () => {
-    await chrome.storage.local.set({ tabHistory: tabHistory, currentTabIndex: currentTabIndex });
     let data = { history: tabHistory, currentTabIndex: currentTabIndex };
-    chrome.runtime.sendMessage({ action: "updatePopupData", data: data }, (response) => {
-        if (chrome.runtime.lastError) {
-            console.log("Failed to send data to popup.js: ", chrome.runtime.lastError.message);
-        } else {
-            console.log("Refreshed data sent to popup.js", response);
-        }
-    });
+    try {
+        await chrome.storage.local.set(data);
+        console.log("Data successfully saved to local storage.");
+    } catch (error) {
+        console.error("Failed to save data to local storage: ", error);
+        return;
+    }
 };
 
 chrome.runtime.onStartup.addListener(async () => {
@@ -209,8 +209,8 @@ chrome.commands.onCommand.addListener((command) => {
     }
 });
 
-chrome.tabs.onActivated.addListener((activeInfo) => {
-    addTabToHistory(activeInfo.tabId);
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    await addTabToHistory(activeInfo.tabId);
     console.log(`Tab ${activeInfo.tabId} is now active.`);
 });
 

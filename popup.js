@@ -5,19 +5,24 @@ let historyListElement = document.getElementById('history');
 let clearHistoryButton = document.getElementById('clear-history');
 
 const initPopup = () => {
-    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
-    requestTabHistoryUpdate();
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    getTabHistory();
 }
 
-const handleRuntimeMessage = (message, _, __) => {
-    if (message.action === "updatePopupData") {
-        console.log("Received data from background.js: ", message);
-        updateTabHistory(message.data);
+const handleStorageChange = (changes, areaName) => {
+    console.log('Storage change detected:', changes, areaName);
+    if (areaName === 'local' && (changes.tabHistory || changes.currentTabIndex)) {
+        const newTabHistory = changes.tabHistory ? changes.tabHistory.newValue : currentTabData.history;
+        const newTabIndex = changes.currentTabIndex ? changes.currentTabIndex.newValue : currentTabData.currentTabIndex;
+        updateTabHistory({ history: newTabHistory, currentTabIndex: newTabIndex });
     }
 }
 
-const requestTabHistoryUpdate = () => {
-    chrome.runtime.sendMessage({ action: "getTabHistory" }, updateTabHistory);
+const getTabHistory = () => {
+    chrome.storage.local.get(['history', 'currentTabIndex'], (data) => {
+        console.log('Retrieved tab history:', data);
+        updateTabHistory(data);
+    });
 }
 
 const updateTabHistory = (newData) => {
@@ -41,6 +46,7 @@ const renderHistoryList = () => {
 const createHistoryListElement = (tab, index) => {
     const listItem = document.createElement('li');
     listItem.textContent = tab.title;
+    listItem.title = `Tab ID: ${tab.tabId}`;
     listItem.classList.add('tab');
     if (index === currentTabData.currentTabIndex) listItem.classList.add('current-tab');
     listItem.addEventListener('click', () => handleTabClick(index));
@@ -60,6 +66,7 @@ const emptyHistoryListMessage = () => {
 if (clearHistoryButton) {
     clearHistoryButton.addEventListener('click', () => {
         chrome.runtime.sendMessage({ action: "clearTabHistory" });
+        getTabHistory();
     });
 }
 
