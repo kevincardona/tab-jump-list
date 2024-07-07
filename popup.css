@@ -42,6 +42,15 @@ li.current-tab {
     color: black;
 }
 
+li.delete-button {
+    background: #FF3333;
+    color: white;
+}
+
+li.delete-button:hover {
+    background: #FF0000;
+}
+
 .center {
     display: block;
     margin: auto;

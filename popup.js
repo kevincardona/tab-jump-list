@@ -1,47 +1,54 @@
 // popup.js
-let historyList = document.getElementById('history');
+
+let currentTabData = [];
+let historyListElement = document.getElementById('history');
 let clearHistoryButton = document.getElementById('clear-history');
 
-document.addEventListener('DOMContentLoaded', () => {
-    const handleMessage = (message, sender, sendResponse) => {
-        if (message.action === "updatePopupData") {
-            reloadTabHistory(message);
-        }
-    };
-
-    chrome.runtime.onMessage.addListener(handleMessage);
-    reloadTabHistory();
-});
-
-let data = [];
-function reloadTabHistory() {
-    chrome.runtime.sendMessage({ action: "getTabHistory" }, (response) => {
-        if (response == data) return;
-        data = response;
-
-        historyList.innerText = '';
-        if (data.history && data.history.length > 0) {
-            data.history.forEach((tab, idx) => {
-                const li = createHistoryListElement(tab, idx, data.currentTabIndex);
-                historyList.appendChild(li);
-            });
-        } else {
-            historyList.appendChild(emptyHistoryListMessage());
-        }
-    });
+const initPopup = () => {
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    requestTabHistoryUpdate();
 }
 
-const createHistoryListElement = (tab, idx, currentIndex) => {
-    const li = document.createElement('li');
-    li.innerText = tab.title;
-    li.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ action: "openTab", index: idx });
-    })
-    li.classList.add('tab');
-    if (currentIndex === idx) {
-        li.classList.add('current-tab');
+const handleRuntimeMessage = (message, _, __) => {
+    if (message.action === "updatePopupData") {
+        console.log("Received data from background.js: ", message);
+        updateTabHistory(message.data);
     }
-    return li;
+}
+
+const requestTabHistoryUpdate = () => {
+    chrome.runtime.sendMessage({ action: "getTabHistory" }, updateTabHistory);
+}
+
+const updateTabHistory = (newData) => {
+    if (JSON.stringify(newData) === JSON.stringify(currentTabData)) return;
+    currentTabData = newData;
+    renderHistoryList();
+}
+
+const renderHistoryList = () => {
+    historyListElement.innerText = '';
+    if (currentTabData.history && currentTabData.history.length > 0) {
+        currentTabData.history.forEach((tab, idx) => {
+            const li = createHistoryListElement(tab, idx, currentTabData.currentTabIndex);
+            historyListElement.appendChild(li);
+        });
+    } else {
+        historyListElement.appendChild(emptyHistoryListMessage());
+    }
+}
+
+const createHistoryListElement = (tab, index) => {
+    const listItem = document.createElement('li');
+    listItem.textContent = tab.title;
+    listItem.classList.add('tab');
+    if (index === currentTabData.currentTabIndex) listItem.classList.add('current-tab');
+    listItem.addEventListener('click', () => handleTabClick(index));
+    return listItem;
+}
+
+const handleTabClick = (index) => {
+    chrome.runtime.sendMessage({ action: "openTab", index: index });
 }
 
 const emptyHistoryListMessage = () => {
@@ -50,6 +57,10 @@ const emptyHistoryListMessage = () => {
     return li;
 }
 
-clearHistoryButton.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ action: "clearTabHistory" });
-});
+if (clearHistoryButton) {
+    clearHistoryButton.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ action: "clearTabHistory" });
+    });
+}
+
+document.addEventListener('DOMContentLoaded', initPopup);
