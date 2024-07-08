@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/kevincardona/tab-jump-list/main/images/icon-128.png" width="64" height="64"/>
+    <img src="./images/icon-128.png" width="64" height="64"/>
 </p>
 <h1 align="center">Tab Jump List</h1>
 
