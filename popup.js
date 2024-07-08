@@ -66,7 +66,7 @@ const emptyHistoryListMessage = () => {
 if (clearHistoryButton) {
     clearHistoryButton.addEventListener('click', () => {
         chrome.runtime.sendMessage({ action: "clearTabHistory" });
-        getTabHistory();
+        setTimeout(()=>getTabHistory(), 100);
     });
 }
 
