@@ -4,6 +4,37 @@ const TAB_HISTORY_LIMIT = 1000;
 
 /** Locks the command execution to prevent multiple commands from executing at the same time. */
 let commandLock = false;
+let isProgrammaticChange = false;
+
+/** Command queue to handle commands sequentially */
+let commandQueue = [];
+
+/** Adds a command to the queue and starts execution if not already running. */
+const addCommandToQueue = (command) => {
+    commandQueue.push(command);
+    if (!commandLock) {
+        executeNextCommand();
+    }
+};
+
+/** Executes the next command in the queue. */
+const executeNextCommand = async () => {
+    if (commandQueue.length === 0) {
+        commandLock = false;
+        return;
+    }
+
+    commandLock = true;
+    const nextCommand = commandQueue.shift();
+    try {
+        await nextCommand();
+    } catch (error) {
+        console.error(`Failed to execute command: ${error}`);
+    } finally {
+        commandLock = false;
+        executeNextCommand();
+    }
+};
 
 /** Saves the tab history and index to storage.
  * @param {Object} data
@@ -35,6 +66,12 @@ const loadExtensionData = () => {
  * */
 const addTabToHistory = async (id) => {
     try {
+        if (isProgrammaticChange) {
+            console.debug("Programmatic tab change detected, not adding to history.");
+            isProgrammaticChange = false;
+            return;
+        }
+
         console.debug(`Adding tab ${id} to history.`);
         let { tabHistoryIndex, tabHistory } = await loadExtensionData();
         if (tabHistoryIndex === -1 && tabHistory.length > 0) {
@@ -114,6 +151,7 @@ const openTabByIndex = async (index, extensionData = undefined) => {
             console.debug(`Index ${index} is out of bounds. Ignoring openTabByIndex request.`);
             return false;
         }
+        isProgrammaticChange = true;
         await chrome.tabs.update(tabHistory[index].id, { active: true });
         await saveExtensionData({ tabHistoryIndex: index, tabHistory });
         console.debug(`Tab ${tabHistory[index].id} opened.`);
@@ -193,20 +231,16 @@ const goForward = async (offset = 1) => {
  * */
 const lock = (cb) => {
     return async (...args) => {
-        console.debug("Command lock acquired.");
-        if (commandLock) {
-            console.debug("Command lock is active. Ignoring command.");
-            return;
-        }
-        try {
-            commandLock = true;
-            await cb(...args);
-        } catch (error) {
-            console.error(`Failed to execute command: ${error}`);
-        } finally {
-            console.debug("Command lock released.");
-            commandLock = false;
-        }
+        addCommandToQueue(async () => {
+            console.debug("Command lock acquired.");
+            try {
+                await cb(...args);
+            } catch (error) {
+                console.error(`Failed to execute command: ${error}`);
+            } finally {
+                console.debug("Command lock released.");
+            }
+        });
     }
 }
 
