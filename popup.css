@@ -13,24 +13,25 @@ ul {
 
 li {
     padding: 0.25rem;
+    transition: background 0.3s, color 0.3s;
 }
 
 li:nth-child(odd) {
-    background: #80808030;
+    background: #4D4D4D;
 }
 
 li:nth-child(odd):hover {
-    background: #80808050;
-    color: black;
+    background: #666;
+    color: #fff;
 }
 
 li:nth-child(even) {
-    background: #80808050;
+    background: #595959;
 }
 
 li:nth-child(even):hover {
-    background: #80808030;
-    color: black;
+    background: #737373;
+    color: #fff;
 }
 
 li.tab {
@@ -42,9 +43,14 @@ li.current-tab {
     color: black;
 }
 
+li.current-tab:hover {
+    background: #FFC300;
+}
+
 li.delete-button {
     background: #FF3333;
     color: white;
+    transition: background 0.3s, color 0.3s;
 }
 
 li.delete-button:hover {
@@ -56,7 +62,20 @@ li.delete-button:hover {
     margin: auto;
 }
 
+.tab-item {
+    display: flex;
+    align-items: center;
+    padding: 4px;
+}
+
+.favicon {
+    width: 1rem;
+    height: 1rem;
+    margin-right: 0.5rem;
+}
+
 #title {
     text-align: center;
     margin: 1rem 0;
 }
+
