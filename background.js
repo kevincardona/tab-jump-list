@@ -1,286 +1,266 @@
 // background.js
 
-let currentTabIndex = -1;
-let history = [];
-let historyLoaded = false;
+const TAB_HISTORY_LIMIT = 1000;
 
-// Locking variables
-let loadingHistory = false;
-let ignoreNextActivatedEvent = false;
+/** Locks the command execution to prevent multiple commands from executing at the same time. */
 let commandLock = false;
 
-/** Loads the tab history from storage. */
-const loadHistory = async () => {
-    try {
-        console.log("Loading tab history from storage...");
-        const result = await chrome.storage.local.get(['history', 'currentTabIndex']);
-        history = result.history || [];
-        currentTabIndex = result.currentTabIndex || -1;
-        historyLoaded = true;
-        console.log("Tab history loaded from storage: ", history);
-    } catch (error) {
-        console.error("Failed to load tab history from storage: ", error);
-    }
-};
-
-/** Initializes the extension by loading the tab history from storage. */
-const initializeExtension = async () => {
-    if (historyLoaded) return;
-    loadingHistory = true;
-    try {
-        await loadHistory();
-    } catch (error) {
-        console.error("Failed to initialize extension: ", error);
-    } finally {
-        loadingHistory = false;
-    }
-};
-
-/** Returns true if the tab should be ignored from the history.
- * @param {number} tabId
- * @returns {boolean}
+/** Saves the tab history and index to storage.
+ * @param {Object} data
+ * @param {number} data.tabHistoryIndex - The index of the current tab in the history.
+ * @param {Array<number>} data.tabHistory - The tab history.
  * */
-const shouldIgnoreTab = (tabId) => {
-    // Chrome loses state when defocused for long enough, so we need to reload the history here
-    if (!historyLoaded && !loadingHistory) {
-        console.log("Ignoring tab because history is not loaded and not loading. Initiating load.");
-        loadHistory();
-        return true;
-    }
-    if (loadingHistory) {
-        console.log("Ignoring tab because history is still loading.");
-        return true;
-    }
-    if (ignoreNextActivatedEvent) {
-        console.log("Ignoring tab because of ignoreNextActivatedEvent.");
-        ignoreNextActivatedEvent = false;
-        return true;
-    }
-    if (tabId === chrome.tabs.TAB_ID_NONE) {
-        console.log("Ignoring tab because it is not a valid tab.");
-        return true;
-    }
-    if (history.length > 0 && tabId === history[0].tabId) {
-        console.log("Ignoring tab because it is already in history.");
-        return true;
-    }
-    return false;
+const saveExtensionData = (data) => {
+    return chrome.storage.local.set(data);
+}
+
+/** Loads the tab history from storage.
+ * @returns {Promise<{tabHistoryIndex: number, tabHistory: Array<number>}>}
+ * */
+const loadExtensionData = () => {
+    return new Promise((resolve, reject) => {
+        chrome.storage.local.get(['tabHistoryIndex', 'tabHistory'])
+            .then(({ tabHistoryIndex, tabHistory }) => {
+                resolve({ tabHistoryIndex, tabHistory });
+            })
+            .catch((error) => {
+                reject(error);
+            })
+    })
 };
+
 
 /** Adds the tab to the history.
- * @param {number} tabId
+ * @param {number} id
  * */
-const addTabToHistory = async (tabId) => {
-    if (shouldIgnoreTab(tabId)) return;
-    if (currentTabIndex !== 0) {
-        console.log("Clearing history after current tab index.");
-        history = history.slice(currentTabIndex);
-        currentTabIndex = 0;
-    }
+const addTabToHistory = async (id) => {
     try {
-        const tab = await getTabById(tabId);
-        history.unshift(tab);
-        await updateData();
-        console.log(`Tab ${tabId} added to history.`);
+        console.debug(`Adding tab ${id} to history.`);
+        let { tabHistoryIndex, tabHistory } = await loadExtensionData();
+        if (tabHistoryIndex === -1 && tabHistory.length > 0) {
+            tabHistoryIndex = 0;
+        }
+        console.debug(`this is the tab history data ${JSON.stringify(tabHistory)}`);
+
+        if (tabHistory.length > tabHistoryIndex && id === tabHistory[tabHistoryIndex]) {
+            console.debug("Ignoring tab because it is already in history.");
+            return;
+        }
+
+        if (tabHistoryIndex !== 0) {
+            console.debug("Clearing history after current tab index.");
+            tabHistory = tabHistory.slice(tabHistoryIndex);
+            tabHistoryIndex = 0;
+        }
+
+        const result = await chrome.tabs.get(id);
+
+        const tab = { id: result.id, title: result.title || `${result.id} (no title)`, favIconUrl: result.favIconUrl };
+
+        tabHistory.unshift(tab);
+
+        if (tabHistory.length > TAB_HISTORY_LIMIT) {
+            tabHistory = tabHistory.slice(0, TAB_HISTORY_LIMIT);
+        }
+
+        await saveExtensionData({ tabHistoryIndex, tabHistory });
     } catch (error) {
         console.error(`Failed to add tab to history: ${error}`);
     }
 };
 
-/** Clears the tab history. */
-const clearTabHistory = async () => {
-    history = [];
-    currentTabIndex = -1;
-    await updateData();
-};
-
-/** Opens the tab with the given tabId.
- * Verifies if the tab exists before opening it.
- * @param {number} tabId
- * @returns {boolean}
+/** Removes the tab from the history.
+ * @param {number} id
  * */
-const openTab = async (tabId) => {
-    try {
-        console.log(`Opening tab ${tabId}`);
-        ignoreNextActivatedEvent = true;
-        await chrome.tabs.update(tabId, { active: true });
-        console.log(`Tab ${tabId} opened.`);
-        return true;
-    } catch (error) {
-        console.log(`Tab ${tabId} does not exist. Ignoring openTab request.`);
-        return false;
-    }
-};
-
-/** Opens the tab with the given index in the history.
- * @param {number} index
- * */
-const openTabByIndex = async (index) => {
-    if (index < 0 || index >= history.length) {
-        console.log(`Index ${index} is out of bounds. Ignoring openTabByIndex request.`);
-        return;
-    }
-    const tab = history[index];
-    console.log(`Opening tab ${tab.tabId} by index ${index}`);
-    let success = await openTab(tab?.tabId);
-    if (!success) {
-        console.log(`Failed to open tab ${tab.tabId}. Removing from history.`);
-        history.splice(index, 1);
-        await openTabByIndex(index);
+const removeTabFromHistory = async (id) => {
+    let { tabHistoryIndex, tabHistory } = await loadExtensionData();
+    const index = tabHistory.findIndex(tab => tab.id === id);
+    if (index !== -1) {
+        tabHistory = tabHistory.filter(tab => tab.id !== id);
+        if (index < tabHistoryIndex) {
+            tabHistoryIndex--;
+        }
+        await saveExtensionData({ tabHistoryIndex, tabHistory });
     }
 }
 
-/** Gets the tab information by tabId.
- * @param {number} tabId
- * @returns {{tabId: number, title: string}}
- * */
-const getTabById = async (tabId) => {
+/** Clears the tab history. */
+const clearTabHistory = async () => {
     try {
-        const tab = await chrome.tabs.get(tabId);
-        return { tabId: tab.id, title: tab.title || `${tab.id} (no title)` };
+        let { tabHistoryIndex, tabHistory } = await loadExtensionData();
+        if (tabHistoryIndex !== -1 && tabHistory.length > 0) {
+            const currentTab = tabHistory[tabHistoryIndex];
+            tabHistory = [currentTab];
+            tabHistoryIndex = 0;
+        } else {
+            tabHistoryIndex = -1;
+            tabHistory = [];
+        }
+        return saveExtensionData({ tabHistoryIndex, tabHistory })
     } catch (error) {
-        throw new Error(error.message);
+        console.error(`Failed to clear tab history: ${error}`);
     }
-};
+}
 
-/** Sets the currentTabIndex and opens the tab with the given index in the history. */
-const setCurrentTabIndex = async (index) => {
-    if (loadingHistory) {
-        console.log("Loading history. Ignoring setCurrentTabIndex request.");
-        return;
+/** Opens the tab with the given index in the history.
+ * @param {number} index
+ * @param {number} direction - The direction to move in the history.
+ * */
+const openTabByIndex = async (index, extensionData = undefined) => {
+    try {
+        console.debug(`Opening tab by index ${index}`);
+        let { tabHistory } = extensionData ? extensionData : await loadExtensionData();
+        if (index < 0 || index >= tabHistory.length) {
+            console.debug(`Index ${index} is out of bounds. Ignoring openTabByIndex request.`);
+            return false;
+        }
+        await chrome.tabs.update(tabHistory[index].id, { active: true });
+        await saveExtensionData({ tabHistoryIndex: index, tabHistory });
+        console.debug(`Tab ${tabHistory[index].id} opened.`);
+        return true;
+    } catch (error) {
+        console.error(`Failed to open tab by index: ${error}`);
+        return false;
     }
-    currentTabIndex = index;
-    await openTabByIndex(index);
-    await updateData();
+}
+
+/** Updates the tab info (title and favicon URL) in the history.
+ * @param {number} id - The tab id.
+ * @param {Object} changes - The changes to the tab.
+ * @param {string} [changes.title] - The new title of the tab.
+ * @param {string} [changes.favIconUrl] - The new favicon URL of the tab.
+ */
+const updateTabInfo = async (id, changes) => {
+    try {
+        console.debug(`Updating tab info for tab ${id}`);
+        let { tabHistoryIndex, tabHistory } = await loadExtensionData();
+        const index = tabHistory.findIndex(tab => tab.id === id);
+        if (index !== -1) {
+            if (changes.title) {
+                tabHistory[index].title = changes.title;
+            }
+            if (changes.favIconUrl) {
+                tabHistory[index].favIconUrl = changes.favIconUrl;
+            }
+            await saveExtensionData({ tabHistoryIndex, tabHistory });
+        }
+    } catch (error) {
+        console.error(`Failed to update tab info in history: ${error}`);
+    }
 };
 
 /** Goes to the previous tab in the history. */
-const goBack = async () => {
-    if (loadingHistory) {
-        console.log("Loading history. Ignoring goBack request.");
-        return;
-    }
-    if (currentTabIndex === -1 && history.length > 0) {
-        currentTabIndex = 0;
-
-    }
-    if (currentTabIndex < history.length - 1 && currentTabIndex >= 0) {
-        const previousTab = history[currentTabIndex];
-        currentTabIndex++;
-        console.log(`Going back to index ${currentTabIndex}`);
-        const newTab = history[currentTabIndex];
-        console.log(`Going back to tab ${newTab.tabId}`);
-        let success = await openTab(newTab.tabId);
-        if (!success || previousTab.tabId === newTab.tabId) {
-            console.log(`Failed to open tab ${newTab.tabId}. Removing from history.`);
-            history.splice(currentTabIndex, 1);
-            currentTabIndex--;
-            await goBack();
-        } else {
-            await updateData();
+const goBack = async (offset = 1) => {
+    try {
+        console.debug("Going back in history.");
+        const extensionData = await loadExtensionData();
+        let { tabHistoryIndex, tabHistory } = extensionData
+        if (tabHistoryIndex + offset > tabHistory.length - 1) {
+            console.debug("No more tabs in history.");
+            return;
         }
+        const success = await openTabByIndex(tabHistoryIndex + offset, extensionData);
+        if (!success) {
+            await goBack(++offset);
+        }
+    } catch (error) {
+        console.error(`Failed to go back: ${error}`);
     }
 };
 
 /** Goes to the next tab in the history. */
-const goForward = async () => {
-    if (loadingHistory) {
-        console.log("Loading history. Ignoring goForward request.");
-        return;
-    }
-    if (currentTabIndex > 0) {
-        const previousTab = history[currentTabIndex];
-        currentTabIndex--;
-        console.log(`Going forward to index ${currentTabIndex}`);
-        const newTab = history[currentTabIndex];
-        console.log(`Going forward to tab ${newTab.tabId}`);
-        let success = await openTab(newTab.tabId);
-        if (!success || previousTab.tabId === newTab.tabId) {
-            console.log(`Failed to open tab ${newTab.tabId}. Removing from history.`);
-            history.splice(currentTabIndex, 1);
-            await goForward();
-        } else {
-            await updateData();
-        }
-    }
-};
-
-/** Updates the tab history and currentTabIndex in storage and sends a message to the popup.js to update the data. */
-const updateData = async () => {
-    if (!historyLoaded) {
-        console.log("Ignoring updateData request because history is not loaded.");
-        return;
-    }
-    let data = { history: history, currentTabIndex: currentTabIndex };
-    console.log("Updating data: ", data);
+const goForward = async (offset = 1) => {
     try {
-        await chrome.storage.local.set(data);
-        console.log("Data successfully saved to local storage.");
+        console.debug("Going forward in history.");
+        const extensionData = await loadExtensionData();
+        let { tabHistoryIndex } = extensionData;
+        if (tabHistoryIndex <= 0) {
+            console.debug("No more tabs ahead.");
+            return;
+        }
+        const success = await openTabByIndex(tabHistoryIndex - offset, extensionData);
+        if (!success) {
+            await goForward(++offset);
+        }
     } catch (error) {
-        console.error("Failed to save data to local storage: ", error);
+        console.error(`Failed to go forward: ${error}`);
     }
-};
+}
 
-// Event listeners
-
-chrome.runtime.onStartup.addListener(async () => {
-    await initializeExtension();
-});
-
-chrome.windows.onFocusChanged.addListener(async (windowId) => {
-    if (windowId !== chrome.windows.WINDOW_ID_NONE) {
-        await initializeExtension();
-    }
-});
-
-chrome.runtime.onInstalled.addListener(async (details) => {
-    if (details.reason === "install") {
-        console.log("Extension installed for the first time.");
-        history = [];
-        currentTabIndex = -1;
-        await updateData();
-    } else if (details.reason === "update") {
-        console.log("Extension updated to new version.");
-    }
-    await initializeExtension();
-});
-
-chrome.commands.onCommand.addListener(async (command) => {
-    await initializeExtension();
-    if (commandLock) {
-        console.log("Command lock is active. Ignoring command.");
-        return;
-    }
-    try {
-        commandLock = true;
-        switch (command) {
-            case "go-back":
-                await goBack();
-                break;
-            case "go-forward":
-                await goForward();
-                break;
+/** Locks the command execution to prevent multiple commands from executing at the same time.
+ * This is useful because the state is shared between all commands.
+ * @param {function} cb - The callback function to execute.
+ * */
+const lock = (cb) => {
+    return async (...args) => {
+        console.debug("Command lock acquired.");
+        if (commandLock) {
+            console.debug("Command lock is active. Ignoring command.");
+            return;
         }
-    } finally {
-        commandLock = false;
+        try {
+            commandLock = true;
+            await cb(...args);
+        } catch (error) {
+            console.error(`Failed to execute command: ${error}`);
+        } finally {
+            console.debug("Command lock released.");
+            commandLock = false;
+        }
+    }
+}
+
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason === "install") {
+        console.debug("Extension installed for the first time.");
+        lock(async () => {
+            chrome.storage.local.set({ tabHistoryIndex: -1, tabHistory: [] })
+        })();
+    } else if (details.reason === "update") {
+        console.debug("Extension updated to new version.");
+        console.debug(`Previous version: ${details.previousVersion}`);
     }
 });
 
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-    await initializeExtension();
-    await addTabToHistory(activeInfo.tabId);
-    console.log(`Tab ${activeInfo.tabId} is now active.`);
-});
-
-chrome.runtime.onMessage.addListener(async (request) => {
-    await initializeExtension();
-    switch (request.action) {
-        case "openTab":
-            await setCurrentTabIndex(request.index);
-            break
-        case "clearTabHistory":
-            clearTabHistory();
+chrome.commands.onCommand.addListener(lock(async (command) => {
+    console.debug(`Command ${command} received.`);
+    switch (command) {
+        case "go-back":
+            await goBack();
+            break;
+        case "go-forward":
+            await goForward();
             break;
     }
-});
+}));
+
+chrome.tabs.onActivated.addListener(lock(async (activeInfo) => {
+    console.debug(`Tab ${JSON.stringify(activeInfo)} activated.`);
+    await addTabToHistory(activeInfo.tabId);
+}));
+
+chrome.tabs.onRemoved.addListener(lock(async (tabId) => {
+    console.debug(`Tab ${tabId} removed.`);
+    await removeTabFromHistory(tabId);
+}));
+
+chrome.tabs.onUpdated.addListener(lock(async (tabId, changeInfo) => {
+    if (changeInfo.title || changeInfo.favIconUrl) {
+        console.debug(`Tab ${tabId} updated. Changes: ${JSON.stringify(changeInfo)}`);
+        await updateTabInfo(tabId, changeInfo);
+    }
+}));
+
+chrome.runtime.onMessage.addListener(lock(async (request) => {
+    console.debug(`Message received: ${request.action}`);
+    switch (request.action) {
+        case "openTab":
+            await openTabByIndex(request.index);
+            break;
+        case "clearTabHistory":
+            await clearTabHistory();
+            console.debug("Tab history cleared.");
+            break;
+    }
+}));
 
