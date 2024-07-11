@@ -4,10 +4,12 @@ const TAB_HISTORY_LIMIT = 1000;
 
 /** Locks the command execution to prevent multiple commands from executing at the same time. */
 let commandLock = false;
-let isProgrammaticChange = false;
 
 /** Command queue to handle commands sequentially */
 let commandQueue = [];
+
+/** Map to keep track of programmatic tab changes. */
+let programmaticChanges = new Map();
 
 /** Adds a command to the queue and starts execution if not already running. */
 const addCommandToQueue = (command) => {
@@ -66,23 +68,23 @@ const loadExtensionData = () => {
  * */
 const addTabToHistory = async (id) => {
     try {
-        if (isProgrammaticChange) {
+        if (programmaticChanges.has(id) && programmaticChanges.get(id) > 0) {
             console.debug("Programmatic tab change detected, not adding to history.");
-            isProgrammaticChange = false;
+            programmaticChanges.set(id, programmaticChanges.get(id) - 1);
             return;
         }
 
-        console.debug(`Adding tab ${id} to history.`);
         let { tabHistoryIndex, tabHistory } = await loadExtensionData();
         if (tabHistoryIndex === -1 && tabHistory.length > 0) {
             tabHistoryIndex = 0;
         }
-        console.debug(`this is the tab history data ${JSON.stringify(tabHistory)}`);
 
         if (tabHistory.length > tabHistoryIndex && id === tabHistory[tabHistoryIndex]) {
             console.debug("Ignoring tab because it is already in history.");
             return;
         }
+
+        console.debug(`Adding tab ${id} to history.`);
 
         if (tabHistoryIndex !== 0) {
             console.debug("Clearing history after current tab index.");
@@ -151,10 +153,17 @@ const openTabByIndex = async (index, extensionData = undefined) => {
             console.debug(`Index ${index} is out of bounds. Ignoring openTabByIndex request.`);
             return false;
         }
-        isProgrammaticChange = true;
-        await chrome.tabs.update(tabHistory[index].id, { active: true });
+
+        const tabId = tabHistory[index].id;
+
+        if (!programmaticChanges.has(tabId)) {
+            programmaticChanges.set(tabId, 0);
+        }
+        programmaticChanges.set(tabId, programmaticChanges.get(tabId) + 1);
+
+        await chrome.tabs.update(tabId, { active: true });
         await saveExtensionData({ tabHistoryIndex: index, tabHistory });
-        console.debug(`Tab ${tabHistory[index].id} opened.`);
+        console.debug(`Tab ${tabId} opened.`);
         return true;
     } catch (error) {
         console.error(`Failed to open tab by index: ${error}`);
@@ -225,6 +234,19 @@ const goForward = async (offset = 1) => {
     }
 }
 
+/** Cleans up the tab history by removing tabs that are no longer open. */
+const cleanupMissingTabs = async () => {
+    try {
+        let { tabHistoryIndex, tabHistory } = await loadExtensionData();
+        const tabs = await chrome.tabs.query({});
+        const tabIds = tabs.map(tab => tab.id);
+        tabHistory = tabHistory.filter(tab => tabIds.includes(tab.id));
+        await saveExtensionData({ tabHistoryIndex, tabHistory });
+    } catch (error) {
+        console.error(`Failed to clean up missing tabs: ${error}`);
+    }
+}
+
 /** Locks the command execution to prevent multiple commands from executing at the same time.
  * This is useful because the state is shared between all commands.
  * @param {function} cb - The callback function to execute.
@@ -255,6 +277,10 @@ chrome.runtime.onInstalled.addListener((details) => {
         console.debug(`Previous version: ${details.previousVersion}`);
     }
 });
+
+chrome.runtime.onStartup.addListener(lock(async () => {
+    await cleanupMissingTabs();
+}));
 
 chrome.commands.onCommand.addListener(lock(async (command) => {
     console.debug(`Command ${command} received.`);
@@ -297,4 +323,3 @@ chrome.runtime.onMessage.addListener(lock(async (request) => {
             break;
     }
 }));
-
