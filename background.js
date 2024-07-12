@@ -28,6 +28,7 @@ const addCommandToQueue = (command) => {
 /** Executes the next command in the queue. */
 const executeNextCommand = async () => {
     if (commandQueue.length === 0) {
+        programmaticChanges.clear();
         commandLock = false;
         return;
     }
@@ -165,6 +166,8 @@ const openTabByIndex = (index, extensionData = undefined) => {
             }
             programmaticChanges.set(tabId, programmaticChanges.get(tabId) + 1);
 
+            const tab = await chrome.tabs.get(tabId);
+            await chrome.windows.update(tab.windowId, {"focused":true});
             await chrome.tabs.update(tabId, { active: true });
             await saveExtensionData({ tabHistoryIndex: index, tabHistory });
             console.debug(`Tab ${tabId} opened.`);
@@ -320,7 +323,13 @@ chrome.commands.onCommand.addListener(lock(async (command) => {
         case "go-back":
             await goBack();
             break;
+        case "go-back-alt":
+            await goBack();
+            break;
         case "go-forward":
+            await goForward();
+            break;
+        case "go-forward-alt":
             await goForward();
             break;
     }

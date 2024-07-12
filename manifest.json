@@ -21,19 +21,25 @@
         "service_worker": "background.js"
     },
     "commands": {
-        "go-back": {
-            "suggested_key": {
-                "default": "Ctrl+O",
-                "mac": "MacCtrl+O"
-            },
-            "description": "Jump to the previous tab in the list"
-        },
         "go-forward": {
             "suggested_key": {
                 "default": "Ctrl+I",
                 "mac": "MacCtrl+I"
             },
-            "description": "Jump to the next tab in the list"
+            "description": "Next Tab"
+        },
+        "go-forward-alt": {
+            "description": "Next Tab - Alt"
+        },
+        "go-back": {
+            "suggested_key": {
+                "default": "Ctrl+O",
+                "mac": "MacCtrl+O"
+            },
+            "description": "Previous Tab"
+        },
+        "go-back-alt": {
+            "description": "Previous Tab - Alt"
         }
     }
 }

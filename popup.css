@@ -2,18 +2,27 @@ body {
     width: 20rem;
     background: #333;
     color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0;
+    max-height: 280px;
 }
 
 ul {
+    border-top: 1.5px solid black;
     list-style-type: none;
     padding-inline-start: 0;
-    margin: 1rem 0;
-    height: 10rem;
+    margin: 1rem 0 0 0;
+    width: 100%;
+    overflow-y: scroll;
+    overflow-x: hidden;
 }
 
 li {
-    padding: 0.25rem;
-    transition: background 0.3s, color 0.3s;
+    padding-bottom: 0.25rem;
+    transition: background 0.1s, color 0.1s;
+    width: 100%;
 }
 
 li:nth-child(odd) {
@@ -74,8 +83,42 @@ li.delete-button:hover {
     margin-right: 0.5rem;
 }
 
-#title {
+
+.btn {
+    width: 10rem;
+    height: 1rem;
+    border-radius: 1rem;
+    background: #555;
+    cursor: pointer;
     text-align: center;
-    margin: 1rem 0;
+    box-shadow: inset 0.2rem 0.2rem 1rem #666,
+        inset -0.2rem -0.2rem 1rem #444,
+        0 4px 8px rgba(0, 0, 0, 0.5);
+    color: #ccc;
+    transition: background 0.3s, color 0.3s;
+    user-select: none;
 }
 
+.btn:hover {
+    color: #fff;
+    box-shadow: inset 0.5rem 0.5rem 2rem #666,
+        inset -0.2rem -0.2rem 1rem #444,
+        0 10px 20px rgba(0, 0, 0, 0.5);
+}
+
+.btn:active {
+    box-shadow: inset 0.2rem 0.2rem 1rem #666,
+        inset -0.2rem -0.2rem 1rem #444,
+        0 4px 8px rgba(0, 0, 0, 0.1);
+    text-decoration: none;
+}
+
+.btn p {
+    font-size: 1.6rem;
+}
+
+#title {
+    margin: 5px;
+    margin-top: 10px;
+    font-size: 1rem;
+}
