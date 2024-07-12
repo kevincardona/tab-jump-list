@@ -1,6 +1,9 @@
-// background.js
+/* If you're reading this i'm sorry for what you are about to witness, this is a mess.
+ * Please forgive me for my sins.
+ * */
 
 const TAB_HISTORY_LIMIT = 1000;
+const MIN_COMMAND_INTERVAL = 100;
 
 /** Locks the command execution to prevent multiple commands from executing at the same time. */
 let commandLock = false;
@@ -10,6 +13,9 @@ let commandQueue = [];
 
 /** Map to keep track of programmatic tab changes. */
 let programmaticChanges = new Map();
+
+/** Timestamp of the last command execution. */
+let lastCommandExecutionTime = 0;
 
 /** Adds a command to the queue and starts execution if not already running. */
 const addCommandToQueue = (command) => {
@@ -38,18 +44,22 @@ const executeNextCommand = async () => {
     }
 };
 
-/** Saves the tab history and index to storage.
- * @param {Object} data
- * @param {number} data.tabHistoryIndex - The index of the current tab in the history.
- * @param {Array<number>} data.tabHistory - The tab history.
- * */
+/** Checks if the minimum interval has passed since the last command execution. */
+const canExecuteCommand = () => {
+    const now = Date.now();
+    if (now - lastCommandExecutionTime >= MIN_COMMAND_INTERVAL) {
+        lastCommandExecutionTime = now;
+        return true;
+    }
+    return false;
+};
+
+/** Saves the tab history and index to storage. */
 const saveExtensionData = (data) => {
     return chrome.storage.local.set(data);
 }
 
-/** Loads the tab history from storage.
- * @returns {Promise<{tabHistoryIndex: number, tabHistory: Array<number>}>}
- * */
+/** Loads the tab history from storage. */
 const loadExtensionData = () => {
     return new Promise((resolve, reject) => {
         chrome.storage.local.get(['tabHistoryIndex', 'tabHistory'])
@@ -62,10 +72,7 @@ const loadExtensionData = () => {
     })
 };
 
-
-/** Adds the tab to the history.
- * @param {number} id
- * */
+/** Adds the tab to the history. */
 const addTabToHistory = async (id) => {
     try {
         if (programmaticChanges.has(id) && programmaticChanges.get(id) > 0) {
@@ -108,9 +115,7 @@ const addTabToHistory = async (id) => {
     }
 };
 
-/** Removes the tab from the history.
- * @param {number} id
- * */
+/** Removes the tab from the history. */
 const removeTabFromHistory = async (id) => {
     let { tabHistoryIndex, tabHistory } = await loadExtensionData();
     const index = tabHistory.findIndex(tab => tab.id === id);
@@ -141,42 +146,37 @@ const clearTabHistory = async () => {
     }
 }
 
-/** Opens the tab with the given index in the history.
- * @param {number} index
- * @param {number} direction - The direction to move in the history.
- * */
-const openTabByIndex = async (index, extensionData = undefined) => {
-    try {
-        console.debug(`Opening tab by index ${index}`);
-        let { tabHistory } = extensionData ? extensionData : await loadExtensionData();
-        if (index < 0 || index >= tabHistory.length) {
-            console.debug(`Index ${index} is out of bounds. Ignoring openTabByIndex request.`);
-            return false;
+/** Opens the tab with the given index in the history. */
+const openTabByIndex = (index, extensionData = undefined) => {
+    return new Promise(async (resolve, reject) => {
+        try {
+            console.debug(`Opening tab by index ${index}`);
+            let { tabHistory } = extensionData ? extensionData : await loadExtensionData();
+            if (index < 0 || index >= tabHistory.length) {
+                console.debug(`Index ${index} is out of bounds. Ignoring openTabByIndex request.`);
+                resolve(false);
+                return;
+            }
+
+            const tabId = tabHistory[index].id;
+
+            if (!programmaticChanges.has(tabId)) {
+                programmaticChanges.set(tabId, 0);
+            }
+            programmaticChanges.set(tabId, programmaticChanges.get(tabId) + 1);
+
+            await chrome.tabs.update(tabId, { active: true });
+            await saveExtensionData({ tabHistoryIndex: index, tabHistory });
+            console.debug(`Tab ${tabId} opened.`);
+            resolve(true);
+        } catch (error) {
+            console.error(`Failed to open tab by index: ${error}`);
+            reject(error);
         }
+    });
+};
 
-        const tabId = tabHistory[index].id;
-
-        if (!programmaticChanges.has(tabId)) {
-            programmaticChanges.set(tabId, 0);
-        }
-        programmaticChanges.set(tabId, programmaticChanges.get(tabId) + 1);
-
-        await chrome.tabs.update(tabId, { active: true });
-        await saveExtensionData({ tabHistoryIndex: index, tabHistory });
-        console.debug(`Tab ${tabId} opened.`);
-        return true;
-    } catch (error) {
-        console.error(`Failed to open tab by index: ${error}`);
-        return false;
-    }
-}
-
-/** Updates the tab info (title and favicon URL) in the history.
- * @param {number} id - The tab id.
- * @param {Object} changes - The changes to the tab.
- * @param {string} [changes.title] - The new title of the tab.
- * @param {string} [changes.favIconUrl] - The new favicon URL of the tab.
- */
+/** Updates the tab info (title and favicon URL) in the history. */
 const updateTabInfo = async (id, changes) => {
     try {
         console.debug(`Updating tab info for tab ${id}`);
@@ -197,41 +197,73 @@ const updateTabInfo = async (id, changes) => {
 };
 
 /** Goes to the previous tab in the history. */
-const goBack = async (offset = 1) => {
-    try {
-        console.debug("Going back in history.");
-        const extensionData = await loadExtensionData();
-        let { tabHistoryIndex, tabHistory } = extensionData
-        if (tabHistoryIndex + offset > tabHistory.length - 1) {
-            console.debug("No more tabs in history.");
-            return;
+const goBack = (offset = 1) => {
+    return new Promise(async (resolve, reject) => {
+        try {
+            if (!canExecuteCommand()) {
+                console.debug("Command called too quickly. Ignoring goBack.");
+                resolve();
+                return;
+            }
+            console.debug("Going back in history.");
+            const extensionData = await loadExtensionData();
+            let { tabHistoryIndex, tabHistory } = extensionData;
+
+            if (tabHistoryIndex + offset >= tabHistory.length) {
+                console.debug("No more tabs in history.");
+                resolve();
+                return;
+            }
+
+            const success = await openTabByIndex(tabHistoryIndex + offset, extensionData);
+            if (success) {
+                tabHistoryIndex += offset;
+                await saveExtensionData({ tabHistoryIndex, tabHistory });
+                resolve();
+            } else {
+                await goBack(++offset);
+                resolve();
+            }
+        } catch (error) {
+            console.error(`Failed to go back: ${error}`);
+            reject(error);
         }
-        const success = await openTabByIndex(tabHistoryIndex + offset, extensionData);
-        if (!success) {
-            await goBack(++offset);
-        }
-    } catch (error) {
-        console.error(`Failed to go back: ${error}`);
-    }
+    });
 };
 
 /** Goes to the next tab in the history. */
-const goForward = async (offset = 1) => {
-    try {
-        console.debug("Going forward in history.");
-        const extensionData = await loadExtensionData();
-        let { tabHistoryIndex } = extensionData;
-        if (tabHistoryIndex <= 0) {
-            console.debug("No more tabs ahead.");
-            return;
+const goForward = (offset = 1) => {
+    return new Promise(async (resolve, reject) => {
+        try {
+            if (!canExecuteCommand()) {
+                console.debug("Command called too quickly. Ignoring goForward.");
+                resolve();
+                return;
+            }
+            console.debug("Going forward in history.");
+            const extensionData = await loadExtensionData();
+            let { tabHistoryIndex, tabHistory } = extensionData;
+
+            if (tabHistoryIndex - offset < 0) {
+                console.debug("No more tabs ahead.");
+                resolve();
+                return;
+            }
+
+            const success = await openTabByIndex(tabHistoryIndex - offset, extensionData);
+            if (success) {
+                tabHistoryIndex -= offset;
+                await saveExtensionData({ tabHistoryIndex, tabHistory });
+                resolve();
+            } else {
+                await goForward(++offset);
+                resolve();
+            }
+        } catch (error) {
+            console.error(`Failed to go forward: ${error}`);
+            reject(error);
         }
-        const success = await openTabByIndex(tabHistoryIndex - offset, extensionData);
-        if (!success) {
-            await goForward(++offset);
-        }
-    } catch (error) {
-        console.error(`Failed to go forward: ${error}`);
-    }
+    });
 }
 
 /** Cleans up the tab history by removing tabs that are no longer open. */
@@ -294,10 +326,14 @@ chrome.commands.onCommand.addListener(lock(async (command) => {
     }
 }));
 
-chrome.tabs.onActivated.addListener(lock(async (activeInfo) => {
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    if (commandLock) {
+        console.debug("Ignoring tab activation event due to command lock.");
+        return;
+    }
     console.debug(`Tab ${JSON.stringify(activeInfo)} activated.`);
     await addTabToHistory(activeInfo.tabId);
-}));
+});
 
 chrome.tabs.onRemoved.addListener(lock(async (tabId) => {
     console.debug(`Tab ${tabId} removed.`);
@@ -323,3 +359,4 @@ chrome.runtime.onMessage.addListener(lock(async (request) => {
             break;
     }
 }));
+
