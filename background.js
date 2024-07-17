@@ -307,6 +307,7 @@ chrome.runtime.onInstalled.addListener((details) => {
         lock(async () => {
             chrome.storage.local.set({ tabHistoryIndex: -1, tabHistory: [] })
         })();
+        chrome.runtime.openOptionsPage();
     } else if (details.reason === "update") {
         console.debug("Extension updated to new version.");
         console.debug(`Previous version: ${details.previousVersion}`);
